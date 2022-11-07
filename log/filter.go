@@ -3,6 +3,8 @@ package log
 // FilterOption is filter option.
 type FilterOption func(*Filter)
 
+const fuzzyStr = "***"
+
 // FilterLevel with filter level.
 func FilterLevel(level Level) FilterOption {
 	return func(opts *Filter) {
@@ -62,9 +64,18 @@ func (f *Filter) Log(level Level, keyvals ...interface{}) error {
 	if level < f.level {
 		return nil
 	}
-	if f.filter != nil && f.filter(level, keyvals...) {
+	// prefixkv contains the slice of arguments defined as prefixes during the log initialization
+	var prefixkv []interface{}
+	l, ok := f.logger.(*logger)
+	if ok && len(l.prefix) > 0 {
+		prefixkv = make([]interface{}, 0, len(l.prefix))
+		prefixkv = append(prefixkv, l.prefix...)
+	}
+
+	if f.filter != nil && (f.filter(level, prefixkv...) || f.filter(level, keyvals...)) {
 		return nil
 	}
+
 	if len(f.key) > 0 || len(f.value) > 0 {
 		for i := 0; i < len(keyvals); i += 2 {
 			v := i + 1
@@ -72,10 +83,10 @@ func (f *Filter) Log(level Level, keyvals ...interface{}) error {
 				continue
 			}
 			if _, ok := f.key[keyvals[i]]; ok {
-				keyvals[v] = "***"
+				keyvals[v] = fuzzyStr
 			}
 			if _, ok := f.value[keyvals[v]]; ok {
-				keyvals[v] = "***"
+				keyvals[v] = fuzzyStr
 			}
 		}
 	}

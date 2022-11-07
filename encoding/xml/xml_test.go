@@ -25,7 +25,7 @@ func TestCodec_Marshal(t *testing.T) {
 		// Test value types
 		{Value: &Plain{true}, ExpectXML: `<Plain><V>true</V></Plain>`},
 		{Value: &Plain{false}, ExpectXML: `<Plain><V>false</V></Plain>`},
-		{Value: &Plain{int(42)}, ExpectXML: `<Plain><V>42</V></Plain>`},
+		{Value: &Plain{42}, ExpectXML: `<Plain><V>42</V></Plain>`},
 		{
 			Value: &NestedOrder{Field1: "C", Field2: "B", Field3: "A"},
 			ExpectXML: `<result>` +
@@ -65,15 +65,15 @@ func TestCodec_Unmarshal(t *testing.T) {
 				`<b>B</b>` +
 				`<a>A</a>` +
 				`</parent>` +
-				`</result>`},
+				`</result>`,
+		},
 	}
 
 	for _, tt := range tests {
 		vt := reflect.TypeOf(tt.want)
 		dest := reflect.New(vt.Elem()).Interface()
 		data := []byte(tt.InputXML)
-		codec := codec{}
-		err := codec.Unmarshal(data, dest)
+		err := (codec{}).Unmarshal(data, dest)
 		if err != nil {
 			t.Errorf("unmarshal(%#v, %#v): %s", tt.InputXML, dest, err)
 		}
@@ -84,7 +84,6 @@ func TestCodec_Unmarshal(t *testing.T) {
 }
 
 func TestCodec_NilUnmarshal(t *testing.T) {
-
 	tests := []struct {
 		want     interface{}
 		InputXML string
@@ -97,7 +96,8 @@ func TestCodec_NilUnmarshal(t *testing.T) {
 				`<b>B</b>` +
 				`<a>A</a>` +
 				`</parent>` +
-				`</result>`},
+				`</result>`,
+		},
 	}
 
 	for _, tt := range tests {

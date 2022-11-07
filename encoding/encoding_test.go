@@ -63,18 +63,16 @@ func TestRegisterCodec(t *testing.T) {
 	}
 }
 
-// PanicTestFunc defines a func that should be passed to the assert.Panics and assert.NotPanics
+// PanicTestFunc defines a func that should be passed to assert.Panics and assert.NotPanics
 // methods, and represents a simple func that takes no arguments, and returns nothing.
 type PanicTestFunc func()
 
 // didPanic returns true if the function passed to it panics. Otherwise, it returns false.
 func didPanic(f PanicTestFunc) (bool, interface{}, string) {
-
 	didPanic := false
 	var message interface{}
 	var stack string
 	func() {
-
 		defer func() {
 			if message = recover(); message != nil {
 				didPanic = true
@@ -84,9 +82,7 @@ func didPanic(f PanicTestFunc) (bool, interface{}, string) {
 
 		// call the target function
 		f()
-
 	}()
 
 	return didPanic, message, stack
-
 }

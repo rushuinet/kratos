@@ -3,7 +3,6 @@ package base
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"path"
@@ -20,7 +19,7 @@ func kratosHome() string {
 	}
 	home := path.Join(dir, ".kratos")
 	if _, err := os.Stat(home); os.IsNotExist(err) {
-		if err := os.MkdirAll(home, 0700); err != nil {
+		if err := os.MkdirAll(home, 0o700); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -30,7 +29,7 @@ func kratosHome() string {
 func kratosHomeWithDir(dir string) string {
 	home := path.Join(kratosHome(), dir)
 	if _, err := os.Stat(home); os.IsNotExist(err) {
-		if err := os.MkdirAll(home, 0700); err != nil {
+		if err := os.MkdirAll(home, 0o700); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -43,7 +42,7 @@ func copyFile(src, dst string, replaces []string) error {
 	if err != nil {
 		return err
 	}
-	buf, err := ioutil.ReadFile(src)
+	buf, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
@@ -55,12 +54,12 @@ func copyFile(src, dst string, replaces []string) error {
 		}
 		buf = bytes.ReplaceAll(buf, []byte(old), []byte(next))
 	}
-	return ioutil.WriteFile(dst, buf, srcinfo.Mode())
+	return os.WriteFile(dst, buf, srcinfo.Mode())
 }
 
 func copyDir(src, dst string, replaces, ignores []string) error {
 	var err error
-	var fds []os.FileInfo
+	var fds []os.DirEntry
 	var srcinfo os.FileInfo
 
 	if srcinfo, err = os.Stat(src); err != nil {
@@ -71,7 +70,7 @@ func copyDir(src, dst string, replaces, ignores []string) error {
 		return err
 	}
 
-	if fds, err = ioutil.ReadDir(src); err != nil {
+	if fds, err = os.ReadDir(src); err != nil {
 		return err
 	}
 	for _, fd := range fds {
@@ -80,14 +79,14 @@ func copyDir(src, dst string, replaces, ignores []string) error {
 		}
 		srcfp := path.Join(src, fd.Name())
 		dstfp := path.Join(dst, fd.Name())
+		var e error
 		if fd.IsDir() {
-			if err = copyDir(srcfp, dstfp, replaces, ignores); err != nil {
-				return err
-			}
+			e = copyDir(srcfp, dstfp, replaces, ignores)
 		} else {
-			if err = copyFile(srcfp, dstfp, replaces); err != nil {
-				return err
-			}
+			e = copyFile(srcfp, dstfp, replaces)
+		}
+		if e != nil {
+			return e
 		}
 	}
 	return nil
@@ -103,8 +102,8 @@ func hasSets(name string, sets []string) bool {
 }
 
 func Tree(path string, dir string) {
-	filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
-		if !info.IsDir() {
+	_ = filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+		if err == nil && info != nil && !info.IsDir() {
 			fmt.Printf("%s %s (%v bytes)\n", color.GreenString("CREATED"), strings.Replace(path, dir+"/", "", -1), info.Size())
 		}
 		return nil

@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/imdario/mergo"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/go-kratos/kratos/v2/log"
 )
 
 // Reader is config reader.
@@ -23,43 +26,61 @@ type Reader interface {
 type reader struct {
 	opts   options
 	values map[string]interface{}
+	lock   sync.Mutex
 }
 
 func newReader(opts options) Reader {
 	return &reader{
 		opts:   opts,
 		values: make(map[string]interface{}),
+		lock:   sync.Mutex{},
 	}
 }
 
 func (r *reader) Merge(kvs ...*KeyValue) error {
-	merged, err := cloneMap(r.values)
+	merged, err := r.cloneMap()
 	if err != nil {
 		return err
 	}
 	for _, kv := range kvs {
 		next := make(map[string]interface{})
 		if err := r.opts.decoder(kv, next); err != nil {
+			log.Errorf("Failed to config decode error: %v key: %s value: %s", err, kv.Key, string(kv.Value))
 			return err
 		}
 		if err := mergo.Map(&merged, convertMap(next), mergo.WithOverride); err != nil {
+			log.Errorf("Failed to config merge error: %v key: %s value: %s", err, kv.Key, string(kv.Value))
 			return err
 		}
 	}
+	r.lock.Lock()
 	r.values = merged
+	r.lock.Unlock()
 	return nil
 }
 
 func (r *reader) Value(path string) (Value, bool) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
 	return readValue(r.values, path)
 }
 
 func (r *reader) Source() ([]byte, error) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
 	return marshalJSON(convertMap(r.values))
 }
 
 func (r *reader) Resolve() error {
+	r.lock.Lock()
+	defer r.lock.Unlock()
 	return r.opts.resolver(r.values)
+}
+
+func (r *reader) cloneMap() (map[string]interface{}, error) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	return cloneMap(r.values)
 }
 
 func cloneMap(src map[string]interface{}) (map[string]interface{}, error) {
@@ -73,12 +94,12 @@ func cloneMap(src map[string]interface{}) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	var copy map[string]interface{}
-	err = dec.Decode(&copy)
+	var clone map[string]interface{}
+	err = dec.Decode(&clone)
 	if err != nil {
 		return nil, err
 	}
-	return copy, nil
+	return clone, nil
 }
 
 func convertMap(src interface{}) interface{} {

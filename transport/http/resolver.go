@@ -4,17 +4,14 @@ import (
 	"context"
 	"errors"
 	"net/url"
-	"sync"
+	"strings"
 	"time"
 
+	"github.com/go-kratos/kratos/v2/internal/endpoint"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
+	"github.com/go-kratos/kratos/v2/selector"
 )
-
-// Updater is resolver nodes updater
-type Updater interface {
-	Update(nodes []*registry.ServiceInstance)
-}
 
 // Target is resolver target
 type Target struct {
@@ -23,12 +20,17 @@ type Target struct {
 	Endpoint  string
 }
 
-func parseTarget(endpoint string) (*Target, error) {
+func parseTarget(endpoint string, insecure bool) (*Target, error) {
+	if !strings.Contains(endpoint, "://") {
+		if insecure {
+			endpoint = "http://" + endpoint
+		} else {
+			endpoint = "https://" + endpoint
+		}
+	}
 	u, err := url.Parse(endpoint)
 	if err != nil {
-		if u, err = url.Parse("http://" + endpoint); err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 	target := &Target{Scheme: u.Scheme, Authority: u.Host}
 	if len(u.Path) > 1 {
@@ -38,25 +40,24 @@ func parseTarget(endpoint string) (*Target, error) {
 }
 
 type resolver struct {
-	lock    sync.RWMutex
-	nodes   []*registry.ServiceInstance
-	updater Updater
+	rebalancer selector.Rebalancer
 
 	target  *Target
 	watcher registry.Watcher
-	logger  *log.Helper
+
+	insecure bool
 }
 
-func newResolver(ctx context.Context, discovery registry.Discovery, target *Target, updater Updater, block bool) (*resolver, error) {
+func newResolver(ctx context.Context, discovery registry.Discovery, target *Target, rebalancer selector.Rebalancer, block, insecure bool) (*resolver, error) {
 	watcher, err := discovery.Watch(ctx, target.Endpoint)
 	if err != nil {
 		return nil, err
 	}
 	r := &resolver{
-		target:  target,
-		watcher: watcher,
-		logger:  log.NewHelper(log.DefaultLogger),
-		updater: updater,
+		target:     target,
+		watcher:    watcher,
+		rebalancer: rebalancer,
+		insecure:   insecure,
 	}
 	if block {
 		done := make(chan error, 1)
@@ -67,8 +68,7 @@ func newResolver(ctx context.Context, discovery registry.Discovery, target *Targ
 					done <- err
 					return
 				}
-				r.update(services)
-				if len(r.nodes) > 0 {
+				if r.update(services) {
 					done <- nil
 					return
 				}
@@ -77,16 +77,21 @@ func newResolver(ctx context.Context, discovery registry.Discovery, target *Targ
 		select {
 		case err := <-done:
 			if err != nil {
-				watcher.Stop()
+				stopErr := watcher.Stop()
+				if stopErr != nil {
+					log.Errorf("failed to http client watch stop: %v, error: %+v", target, stopErr)
+				}
 				return nil, err
 			}
 		case <-ctx.Done():
-			r.logger.Errorf("http client watch service %v reaching context deadline!", target)
-			watcher.Stop()
+			log.Errorf("http client watch service %v reaching context deadline!", target)
+			stopErr := watcher.Stop()
+			if stopErr != nil {
+				log.Errorf("failed to http client watch stop: %v, error: %+v", target, stopErr)
+			}
 			return nil, ctx.Err()
 		}
 	}
-
 	go func() {
 		for {
 			services, err := watcher.Next()
@@ -94,53 +99,37 @@ func newResolver(ctx context.Context, discovery registry.Discovery, target *Targ
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				r.logger.Errorf("http client watch service %v got unexpected error:=%v", target, err)
+				log.Errorf("http client watch service %v got unexpected error:=%v", target, err)
 				time.Sleep(time.Second)
 				continue
 			}
 			r.update(services)
 		}
 	}()
-
 	return r, nil
 }
 
-func (r *resolver) update(services []*registry.ServiceInstance) {
-	var nodes []*registry.ServiceInstance
-	for _, in := range services {
-		_, endpoint, err := parseEndpoint(in.Endpoints)
+func (r *resolver) update(services []*registry.ServiceInstance) bool {
+	nodes := make([]selector.Node, 0)
+	for _, ins := range services {
+		ept, err := endpoint.ParseEndpoint(ins.Endpoints, endpoint.Scheme("http", !r.insecure))
 		if err != nil {
-			r.logger.Errorf("Failed to parse (%v) discovery endpoint: %v error %v", r.target, in.Endpoints, err)
+			log.Errorf("Failed to parse (%v) discovery endpoint: %v error %v", r.target, ins.Endpoints, err)
 			continue
 		}
-		if endpoint == "" {
+		if ept == "" {
 			continue
 		}
-		nodes = append(nodes, in)
+		nodes = append(nodes, selector.NewNode("http", ept, ins))
 	}
-	if len(nodes) != 0 {
-		r.updater.Update(nodes)
-		r.lock.Lock()
-		r.nodes = nodes
-		r.lock.Unlock()
-	} else {
-		r.logger.Warnf("[http resovler]Zero endpoint found,refused to write,ser: %s ins: %v", r.target.Endpoint, nodes)
+	if len(nodes) == 0 {
+		log.Warnf("[http resolver]Zero endpoint found,refused to write,set: %s ins: %v", r.target.Endpoint, nodes)
+		return false
 	}
+	r.rebalancer.Apply(nodes)
+	return true
 }
 
 func (r *resolver) Close() error {
 	return r.watcher.Stop()
-}
-
-func parseEndpoint(endpoints []string) (string, string, error) {
-	for _, e := range endpoints {
-		u, err := url.Parse(e)
-		if err != nil {
-			return "", "", err
-		}
-		if u.Scheme == "http" {
-			return u.Scheme, u.Host, nil
-		}
-	}
-	return "", "", nil
 }

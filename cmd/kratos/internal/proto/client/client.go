@@ -2,7 +2,6 @@ package client
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,16 +13,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	// CmdClient represents the source command.
-	CmdClient = &cobra.Command{
-		Use:                "client",
-		Short:              "Generate the proto client code",
-		Long:               "Generate the proto client code. Example: kratos proto client helloworld.proto",
-		DisableFlagParsing: true,
-		Run:                run,
+// CmdClient represents the source command.
+var CmdClient = &cobra.Command{
+	Use:   "client",
+	Short: "Generate the proto client code",
+	Long:  "Generate the proto client code. Example: kratos proto client helloworld.proto",
+	Run:   run,
+}
+
+var protoPath string
+
+func init() {
+	if protoPath = os.Getenv("KRATOS_PROTO_PATH"); protoPath == "" {
+		protoPath = "./third_party"
 	}
-)
+	CmdClient.Flags().StringVarP(&protoPath, "proto_path", "p", protoPath, "proto path")
+}
 
 func run(cmd *cobra.Command, args []string) {
 	if len(args) == 0 {
@@ -34,7 +39,7 @@ func run(cmd *cobra.Command, args []string) {
 		err   error
 		proto = strings.TrimSpace(args[0])
 	)
-	if err = look("protoc-gen-go", "protoc-gen-go-grpc", "protoc-gen-go-http", "protoc-gen-go-errors", "protoc-gen-validate"); err != nil {
+	if err = look("protoc-gen-go", "protoc-gen-go-grpc", "protoc-gen-go-http", "protoc-gen-go-errors", "protoc-gen-openapi"); err != nil {
 		// update the kratos plugins
 		cmd := exec.Command("kratos", "upgrade")
 		cmd.Stdout = os.Stdout
@@ -79,15 +84,21 @@ func walk(dir string, args []string) error {
 func generate(proto string, args []string) error {
 	input := []string{
 		"--proto_path=.",
-		"--proto_path=./third_party",
+	}
+	if pathExists(protoPath) {
+		input = append(input, "--proto_path="+protoPath)
+	}
+	inputExt := []string{
 		"--proto_path=" + base.KratosMod(),
 		"--proto_path=" + filepath.Join(base.KratosMod(), "third_party"),
 		"--go_out=paths=source_relative:.",
 		"--go-grpc_out=paths=source_relative:.",
 		"--go-http_out=paths=source_relative:.",
 		"--go-errors_out=paths=source_relative:.",
+		"--openapi_out=paths=source_relative:.",
 	}
-	protoBytes, err := ioutil.ReadFile(proto)
+	input = append(input, inputExt...)
+	protoBytes, err := os.ReadFile(proto)
 	if err == nil && len(protoBytes) > 0 {
 		if ok, _ := regexp.Match(`\n[^/]*(import)\s+"validate/validate.proto"`, protoBytes); ok {
 			input = append(input, "--validate_out=lang=go,paths=source_relative:.")
@@ -108,4 +119,12 @@ func generate(proto string, args []string) error {
 	}
 	fmt.Printf("proto: %s\n", proto)
 	return nil
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	if err != nil {
+		return os.IsExist(err)
+	}
+	return true
 }

@@ -2,6 +2,7 @@ package host
 
 import (
 	"net"
+	"reflect"
 	"testing"
 )
 
@@ -74,6 +75,36 @@ func TestExtract(t *testing.T) {
 			}
 		})
 	}
+	lis, err := net.Listen("tcp", ":12345")
+	if err != nil {
+		t.Errorf("expected: %v got %v", nil, err)
+	}
+	res, err := Extract("", lis)
+	if err != nil {
+		t.Errorf("expected: %v got %v", nil, err)
+	}
+	expect, err := Extract(lis.Addr().String(), nil)
+	if err != nil {
+		t.Errorf("expected: %v got %v", nil, err)
+	}
+	if !reflect.DeepEqual(res, expect) {
+		t.Errorf("expected %s got %s", expect, res)
+	}
+}
+
+func TestExtract2(t *testing.T) {
+	addr := "localhost:9001"
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Errorf("expected: %v got %v", nil, err)
+	}
+	res, err := Extract(addr, lis)
+	if err != nil {
+		t.Errorf("expected: %v got %v", nil, err)
+	}
+	if !reflect.DeepEqual(res, "localhost:9001") {
+		t.Errorf("expected %s got %s", "localhost:9001", res)
+	}
 }
 
 func TestPort(t *testing.T) {
@@ -103,5 +134,16 @@ func TestExtractHostPort(t *testing.T) {
 	host, port, err = ExtractHostPort("consul://2/33")
 	if err == nil {
 		t.Fatalf("expected: not nil got %v", nil)
+	}
+	t.Logf("host port: %s,  %d", host, port)
+}
+
+func TestIpIsUp(t *testing.T) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		t.Fail()
+	}
+	for i := range interfaces {
+		println(interfaces[i].Name, interfaces[i].Flags&net.FlagUp)
 	}
 }

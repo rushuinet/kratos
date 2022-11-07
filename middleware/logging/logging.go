@@ -32,7 +32,7 @@ func Server(logger log.Logger) middleware.Middleware {
 				reason = se.Reason
 			}
 			level, stack := extractError(err)
-			log.WithContext(ctx, logger).Log(level,
+			_ = log.WithContext(ctx, logger).Log(level,
 				"kind", "server",
 				"component", kind,
 				"operation", operation,
@@ -47,7 +47,7 @@ func Server(logger log.Logger) middleware.Middleware {
 	}
 }
 
-// Client is an client logging middleware.
+// Client is a client logging middleware.
 func Client(logger log.Logger) middleware.Middleware {
 	return func(handler middleware.Handler) middleware.Handler {
 		return func(ctx context.Context, req interface{}) (reply interface{}, err error) {
@@ -68,7 +68,7 @@ func Client(logger log.Logger) middleware.Middleware {
 				reason = se.Reason
 			}
 			level, stack := extractError(err)
-			log.WithContext(ctx, logger).Log(level,
+			_ = log.WithContext(ctx, logger).Log(level,
 				"kind", "client",
 				"component", kind,
 				"operation", operation,

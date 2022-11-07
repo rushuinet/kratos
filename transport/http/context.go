@@ -9,9 +9,11 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/go-kratos/kratos/v2/middleware"
-	"github.com/go-kratos/kratos/v2/transport/http/binding"
 	"github.com/gorilla/mux"
+
+	"github.com/go-kratos/kratos/v2/middleware"
+	"github.com/go-kratos/kratos/v2/transport"
+	"github.com/go-kratos/kratos/v2/transport/http/binding"
 )
 
 var _ Context = (*wrapper)(nil)
@@ -45,7 +47,7 @@ type responseWriter struct {
 	w    http.ResponseWriter
 }
 
-func (w *responseWriter) rest(res http.ResponseWriter) {
+func (w *responseWriter) reset(res http.ResponseWriter) {
 	w.w = res
 	w.code = http.StatusOK
 }
@@ -75,23 +77,28 @@ func (c *wrapper) Vars() url.Values {
 	}
 	return vars
 }
+
 func (c *wrapper) Form() url.Values {
 	if err := c.req.ParseForm(); err != nil {
 		return url.Values{}
 	}
 	return c.req.Form
 }
+
 func (c *wrapper) Query() url.Values {
 	return c.req.URL.Query()
 }
 func (c *wrapper) Request() *http.Request        { return c.req }
 func (c *wrapper) Response() http.ResponseWriter { return c.res }
 func (c *wrapper) Middleware(h middleware.Handler) middleware.Handler {
-	return middleware.Chain(c.router.srv.ms...)(h)
+	if tr, ok := transport.FromServerContext(c.req.Context()); ok {
+		return middleware.Chain(c.router.srv.middleware.Match(tr.Operation())...)(h)
+	}
+	return middleware.Chain(c.router.srv.middleware.Match(c.req.URL.Path)...)(h)
 }
-func (c *wrapper) Bind(v interface{}) error      { return c.router.srv.dec(c.req, v) }
-func (c *wrapper) BindVars(v interface{}) error  { return binding.BindQuery(c.Vars(), v) }
-func (c *wrapper) BindQuery(v interface{}) error { return binding.BindQuery(c.Query(), v) }
+func (c *wrapper) Bind(v interface{}) error      { return c.router.srv.decBody(c.req, v) }
+func (c *wrapper) BindVars(v interface{}) error  { return c.router.srv.decVars(c.req, v) }
+func (c *wrapper) BindQuery(v interface{}) error { return c.router.srv.decQuery(c.req, v) }
 func (c *wrapper) BindForm(v interface{}) error  { return binding.BindForm(c.req, v) }
 func (c *wrapper) Returns(v interface{}, err error) error {
 	if err != nil {
@@ -120,14 +127,20 @@ func (c *wrapper) XML(code int, v interface{}) error {
 func (c *wrapper) String(code int, text string) error {
 	c.res.Header().Set("Content-Type", "text/plain")
 	c.res.WriteHeader(code)
-	c.res.Write([]byte(text))
+	_, err := c.res.Write([]byte(text))
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
 func (c *wrapper) Blob(code int, contentType string, data []byte) error {
 	c.res.Header().Set("Content-Type", contentType)
 	c.res.WriteHeader(code)
-	c.res.Write(data)
+	_, err := c.res.Write(data)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -139,7 +152,7 @@ func (c *wrapper) Stream(code int, contentType string, rd io.Reader) error {
 }
 
 func (c *wrapper) Reset(res http.ResponseWriter, req *http.Request) {
-	c.w.rest(res)
+	c.w.reset(res)
 	c.res = res
 	c.req = req
 }
